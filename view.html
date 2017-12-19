@@ -1,0 +1,15 @@
+<html>
+    <head>
+        <script src="https://d3js.org/d3.v3.min.js"></script>
+        <script src="https://d3js.org/queue.v1.min.js"></script>
+        <script src="https://d3js.org/topojson.v1.min.js"></script>
+        <script>
+            let width = window.innerWidth;
+            let height = window.innerHeight;
+            let projection = d3.geo.albersUsa().scale(1080).translate([width / 2, height / 2]);
+            let path = d3.geo.path().projection(projection);
+            
+        
+        </script>
+    </head>
+</html>
