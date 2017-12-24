@@ -6,6 +6,12 @@ import os
 from shapely.geometry import polygon
 
 
+def get_file_name(path):
+    """Get the name of a file with no extension."""
+
+    return os.path.splitext(os.path.split(source)[1])[0]
+
+
 def get_write_path(destination, name):
     """Get a write path using default file name if given a directory."""
 
@@ -14,10 +20,10 @@ def get_write_path(destination, name):
     return destination
 
 
-def shape_to_geojson(source, destination="derived/"):
+def shape_to_geojson(shape, destination="derived/"):
     """Convert a shape file to GeoJSON."""
 
-    reader = shapefile.Reader(source)
+    reader = shapefile.Reader(shape)
     fields = reader.fields[1:]
     names = [field[0] for field in fields]
     buffer = []
@@ -31,15 +37,15 @@ def shape_to_geojson(source, destination="derived/"):
 
     collection = geojson.FeatureCollection(buffer)
 
-    name = os.path.splitext(os.path.split(source)[1])[0] + ".geojson"
+    name = get_file_name(shape) + ".geojson"
     with open(get_write_path(destination, name), "w") as write:
         geojson.dump(collection, write)
 
 
-def compute_adjacent(source):
+def compute_adjacent(geography, destination="derived/"):
     """Compute the adjacent precincts."""
 
-    with open(source) as file:
+    with open(geography) as file:
         data = geojson.load(file)
 
     polygons = []
@@ -66,6 +72,7 @@ def compute_adjacent(source):
     except:
         print("cancelled at %i" % i)
 
-    with open("derived/adjacent.json", "w") as file:
+    name = get_file_name(geography) + ".adjacency.json"
+    with open(get_write_path(destination, name), "w") as file:
         json.dump(adjacent, file)
-    
+
