@@ -1,103 +1,71 @@
+import shapefile
+import geojson
 import json
-import csv
-import numpy
-from concurrent.futures import ThreadPoolExecutor
+import os
+
+from shapely.geometry import polygon
 
 
-def m(x, y):
-    return (x[0] - y[0])**2 + (x[1] - y[1])**2
+def get_write_path(destination, name):
+    """Get a write path using default file name if given a directory."""
+
+    if os.path.isdir(destination):
+        return os.path.join(destination, name)
+    return destination
 
 
-def flatten(x):
-    if isinstance(x, list):
-        return [a for i in x for a in flatten(i)]
-    return [x]
+def shape_to_geojson(source, destination="derived/"):
+    """Convert a shape file to GeoJSON."""
+
+    reader = shapefile.Reader(source)
+    fields = reader.fields[1:]
+    names = [field[0] for field in fields]
+    buffer = []
+
+    for record in reader.shapeRecords():
+        properties = dict(zip(names, record.record))
+        geometry = record.shape.__geo_interface__
+        buffer.append(geojson.Feature(
+            geometry=geometry,
+            properties=properties))
+
+    collection = geojson.FeatureCollection(buffer)
+
+    name = os.path.splitext(os.path.split(source)[1])[0] + ".geojson"
+    with open(get_write_path(destination, name), "w") as write:
+        geojson.dump(collection, write)
+
+
+def compute_adjacent(source):
+    """Compute the adjacent precincts."""
+
+    with open(source) as file:
+        data = geojson.load(file)
+
+    polygons = []
+    for i in range(len(data.features)):
+        n = data[i].properties["GEOID10"]
+        if data[i].geometry.type == "Polygon":
+            p = polygon.Polygon(data[i].geometry.coordinates[0])
+            polygons.append((p, n))
+        elif data[i].geometry.type == "MultiPolygon":
+            for coordinates in data[i].geometry.coordinates:
+                p = polygon.Polygon(coordinates[0])
+                polygons.append((p, n))
+        
+    t = len(polygons)
+
+    adjacent = {n: [] for p, n in polygons}
+    try:
+        for i, (a, na) in enumerate(polygons[:-1]):
+            print("%i/%i %f%%" % (i, t, i/t * 100))
+            for (b, nb) in polygons[i+1:]:
+                if a.intersects(b):
+                    adjacent[na].append(nb)
+                    adjacent[nb].append(na)
+    except:
+        print("cancelled at %i" % i)
+
+    with open("derived/adjacent.json", "w") as file:
+        json.dump(adjacent, file)
     
-
-def simplify(geography, voting):
-    """Convert a topojson file to a simplified format."""
-
-    out = []
-
-    # Load the topojson file
-    with open(geography) as file:
-        geo = json.load(file)
-    state = tuple(geo["objects"].keys())[0]
-
-    # Load the CSV file with voting data
-    votes = {}
-    with open(voting) as file:
-        reader = csv.reader(file)
-        next(reader)  # Skip headers
-        next(reader)
-        for geoid, d2016, r2016, *_ in reader:
-            votes[int(geoid)] = [int(d2016), int(r2016)]
-
-    total = 0
-    missing = 0
-
-    for precinct in geo["objects"][state]["geometries"]:
-        geoid = int(precinct["properties"]["GEOID10"])
-        total += 1
-        
-        if geoid not in votes:
-            print("Missing voting data for precinct %i" % geoid)
-            votes[geoid] = [0, 0]
-            missing += 1
-
-        out.append({
-            "id": geoid,
-            "name": precinct["properties"]["NAME10"],
-            "arcs": flatten(precinct["arcs"]),
-            "population": precinct["properties"]["TOTAL_POPU"],
-            "d2016": votes[geoid][0],
-            "r2016": votes[geoid][1]})
-
-    print("Missing voting data for %i precincts" % missing)
-    print("Loaded %i precincts total" % total)
-
-    with open("data/simple.json", "w") as file:
-        json.dump(out, file, indent=2)
-        
-
-def adjacent(geography):
-    """Load adjacent GeoID's."""
-
-    # Load district polygons
-    with open(geography) as file:
-        data = json.load(file)
-    precincts = []
-    for precinct in data["features"]:
-        geometry = precinct["geometry"]
-        if geometry["type"] == "Polygon":
-            coordinates = sum(geometry["coordinates"], [])
-        elif geometry["type"] == "MultiPolygon":
-            coordinates = sum(sum(geometry["coordinates"], []), [])
-        precincts.append({
-            "id": precinct["properties"]["GEOID10"],
-            "coordinates": coordinates})
-
-    count = len(precincts)
-    adjacent = {precinct["id"]: [] for precinct in precincts}
-
-    # Check adjacency
-    def check(i, a, rest):
-        print("%i/%i %f" % (i, count, i/count))
-        for b in rest:
-            close = False
-            for c in a["coordinates"]:
-                for d in b["coordinates"]:
-                    if m(c, d) < 1e-2:
-                        close = True
-            if close:
-                adjacent[a["id"]].append(b["id"])
-                adjacent[b["id"]].append(a["id"])
-
-    executor = ThreadPoolExecutor()
-    for i, precinct in enumerate(precincts[:-1]):
-        #check(precinct, precincts[i+1:])
-        executor.submit(check, i, precinct, precincts[i+1:])
-    executor.shutdown(wait=True)
-
-    with open("data/adjacent.json", "w") as file:
-        json.dump(adjacent, file, indent=2)
